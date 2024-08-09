@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Barcode Scanner with Camera Toggle and Output</title>
+    <title>Barcode Scanner with Checkbox Selection</title>
     <style>
         body {
             display: flex;
@@ -15,9 +15,6 @@
         }
         #scanner-container {
             position: relative;
-            width: 100%;
-            max-width: 640px;
-            height: 480px;
             margin: 20px 0;
             border: 1px solid #ddd;
         }
@@ -35,28 +32,58 @@
             font-size: 20px;
             color: #333;
         }
-        button, select {
+        button {
             padding: 10px 20px;
             font-size: 16px;
             margin-top: 10px;
+        }
+        #reader-select {
+            margin-bottom: 10px;
+            text-align: left;
+        }
+        #reader-select label {
+            display: block;
+            margin-bottom: 5px;
         }
     </style>
 </head>
 <body>
     <h1>Barcode Scanner</h1>
+    <div id="reader-select">
+        <button id="select-all">Select All</button>
+        <button id="deselect-all">Deselect All</button>
+        <br><br>
+        <label><input type="checkbox" class="barcode-reader" value="code_128_reader"> Code 128</label>
+        <label><input type="checkbox" class="barcode-reader" value="ean_reader"> EAN</label>
+        <label><input type="checkbox" class="barcode-reader" value="ean_8_reader"> EAN-8</label>
+        <label><input type="checkbox" class="barcode-reader" value="code_39_reader"> Code 39</label>
+        <label><input type="checkbox" class="barcode-reader" value="code_39_vin_reader"> Code 39 VIN</label>
+        <label><input type="checkbox" class="barcode-reader" value="codabar_reader"> Codabar</label>
+        <label><input type="checkbox" class="barcode-reader" value="upc_reader"> UPC</label>
+        <label><input type="checkbox" class="barcode-reader" value="upc_e_reader"> UPC-E</label>
+        <label><input type="checkbox" class="barcode-reader" value="i2of5_reader"> Interleaved 2 of 5</label>
+    </div>
     <select id="camera-select"></select>
     <button id="camera-toggle">Turn Camera On</button>
     <div id="scanner-container">
         <div id="scanner-highlight"></div>
     </div>
-    <div id="output">Scanned Barcode: <span id="barcode-result">None</span></div>
+    <div id="output">
+        Scanned Barcode: <span id="barcode-result">None</span><br>
+        Barcode Type: <span id="barcode-type">None</span>
+    </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
     <script>
         const cameraSelect = document.getElementById('camera-select');
         const highlight = document.getElementById('scanner-highlight');
         const cameraToggle = document.getElementById('camera-toggle');
+        const barcodeReaderCheckboxes = document.querySelectorAll('.barcode-reader');
+        const selectAllButton = document.getElementById('select-all');
+        const deselectAllButton = document.getElementById('deselect-all');
+        const scannerContainer = document.getElementById('scanner-container');
         const barcodeResult = document.getElementById('barcode-result');
+        const barcodeType = document.getElementById('barcode-type');
         let scanningPaused = false;
         let cameraIsOn = false;
 
@@ -85,27 +112,62 @@
             }
         });
 
-        function startScanner() {
+        selectAllButton.addEventListener('click', () => {
+            barcodeReaderCheckboxes.forEach(checkbox => checkbox.checked = true);
+        });
+
+        deselectAllButton.addEventListener('click', () => {
+            barcodeReaderCheckboxes.forEach(checkbox => checkbox.checked = false);
+        });
+
+        async function startScanner() {
             if (Quagga.initialized) {
                 Quagga.stop(); // 현재 작동 중인 스캐너 중지
             }
 
             const selectedDeviceId = cameraSelect.value;
 
+            // 선택된 바코드 리더 목록 가져오기
+            const selectedReaders = Array.from(barcodeReaderCheckboxes)
+                .filter(checkbox => checkbox.checked)
+                .map(checkbox => checkbox.value);
+
+            if (selectedReaders.length === 0) {
+                alert("Please select at least one barcode type.");
+                return;
+            }
+
+            // 카메라 해상도 가져오기
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { deviceId: selectedDeviceId }
+            });
+
+            const track = stream.getVideoTracks()[0];
+            const settings = track.getSettings();
+            const width = settings.width || 640; // 기본값 640
+            const height = settings.height || 480; // 기본값 480
+
+            // 스트림 멈추기 (해상도만 확인하고 바로 멈춤)
+            stream.getTracks().forEach(track => track.stop());
+
+            // 스캐너 컨테이너 크기 설정
+            scannerContainer.style.width = `${width}px`;
+            scannerContainer.style.height = `${height}px`;
+
             Quagga.init({
                 inputStream: {
                     name: "Live",
                     type: "LiveStream",
-                    target: document.querySelector('#scanner-container'), // 카메라 출력할 div 선택
+                    target: scannerContainer, // 카메라 출력할 div 선택
                     constraints: {
                         deviceId: selectedDeviceId, // 사용자가 선택한 카메라
-                        width: 640,
-                        height: 480,
+                        width: width,
+                        height: height,
                         facingMode: "environment"
                     },
                 },
                 decoder: {
-                    readers: ["code_128_reader", "ean_reader", "ean_8_reader", "code_39_reader", "code_39_vin_reader", "codabar_reader", "upc_reader", "upc_e_reader", "i2of5_reader"]
+                    readers: selectedReaders // 사용자가 선택한 바코드 리더들
                 },
             }, function (err) {
                 if (err) {
@@ -123,6 +185,7 @@
                 if (scanningPaused) return;
 
                 const code = result.codeResult.code;
+                const type = result.codeResult.format;
                 const box = result.box;
                 const x = Math.min(box[0][0], box[1][0], box[2][0], box[3][0]);
                 const y = Math.min(box[0][1], box[1][1], box[2][1], box[3][1]);
@@ -131,7 +194,7 @@
 
                 // 스캔 영역(가운데 빨간색 직사각형)의 경계값을 가져오기
                 const highlightRect = highlight.getBoundingClientRect();
-                const scannerContainerRect = document.querySelector('#scanner-container').getBoundingClientRect();
+                const scannerContainerRect = scannerContainer.getBoundingClientRect();
 
                 // 바코드 박스가 가운데 스캔 영역 내에 있는지 확인
                 const barcodeInRegion = (
@@ -146,6 +209,7 @@
 
                     // 바코드 결과 화면에 출력
                     barcodeResult.textContent = code;
+                    barcodeType.textContent = type;
 
                     // 1초간 스캔 멈추기
                     scanningPaused = true;
@@ -165,7 +229,8 @@
         }
 
         window.onload = function() {
-            // 초기 로딩 시에는 카메라가 꺼져있음
+            // 모든 체크박스를 기본적으로 선택
+            barcodeReaderCheckboxes.forEach(checkbox => checkbox.checked = true);
             cameraToggle.textContent = "Turn Camera On";
         };
     </script>
