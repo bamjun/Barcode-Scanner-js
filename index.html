@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Barcode Scanner with Camera Toggle and Output</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            font-family: Arial, sans-serif;
+        }
+        #scanner-container {
+            position: relative;
+            width: 100%;
+            max-width: 640px;
+            height: 480px;
+            margin: 20px 0;
+            border: 1px solid #ddd;
+        }
+        #scanner-highlight {
+            position: absolute;
+            border: 2px solid red;
+            box-sizing: border-box;
+            width: 50%; /* 너비 조정 */
+            height: 30%; /* 높이 조정 */
+            left: 25%; /* 가로 중심 */
+            top: 35%; /* 세로 중심 */
+        }
+        #output {
+            margin-top: 20px;
+            font-size: 20px;
+            color: #333;
+        }
+        button, select {
+            padding: 10px 20px;
+            font-size: 16px;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Barcode Scanner</h1>
+    <select id="camera-select"></select>
+    <button id="camera-toggle">Turn Camera On</button>
+    <div id="scanner-container">
+        <div id="scanner-highlight"></div>
+    </div>
+    <div id="output">Scanned Barcode: <span id="barcode-result">None</span></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
+    <script>
+        const cameraSelect = document.getElementById('camera-select');
+        const highlight = document.getElementById('scanner-highlight');
+        const cameraToggle = document.getElementById('camera-toggle');
+        const barcodeResult = document.getElementById('barcode-result');
+        let scanningPaused = false;
+        let cameraIsOn = false;
+
+        // 사용 가능한 카메라 장치 목록을 가져와서 <select> 요소에 추가
+        navigator.mediaDevices.enumerateDevices().then(devices => {
+            const videoDevices = devices.filter(device => device.kind === 'videoinput');
+            videoDevices.forEach((device, index) => {
+                const option = document.createElement('option');
+                option.value = device.deviceId;
+                option.text = device.label || `Camera ${index + 1}`;
+                cameraSelect.appendChild(option);
+            });
+        });
+
+        cameraSelect.addEventListener('change', () => {
+            if (cameraIsOn) {
+                startScanner();
+            }
+        });
+
+        cameraToggle.addEventListener('click', () => {
+            if (cameraIsOn) {
+                stopScanner();
+            } else {
+                startScanner();
+            }
+        });
+
+        function startScanner() {
+            if (Quagga.initialized) {
+                Quagga.stop(); // 현재 작동 중인 스캐너 중지
+            }
+
+            const selectedDeviceId = cameraSelect.value;
+
+            Quagga.init({
+                inputStream: {
+                    name: "Live",
+                    type: "LiveStream",
+                    target: document.querySelector('#scanner-container'), // 카메라 출력할 div 선택
+                    constraints: {
+                        deviceId: selectedDeviceId, // 사용자가 선택한 카메라
+                        width: 640,
+                        height: 480,
+                        facingMode: "environment"
+                    },
+                },
+                decoder: {
+                    readers: ["code_128_reader", "ean_reader", "ean_8_reader", "code_39_reader", "code_39_vin_reader", "codabar_reader", "upc_reader", "upc_e_reader", "i2of5_reader"]
+                },
+            }, function (err) {
+                if (err) {
+                    console.log(err);
+                    return;
+                }
+                console.log("Initialization finished. Ready to start");
+                Quagga.start();
+                Quagga.initialized = true;
+                cameraIsOn = true;
+                cameraToggle.textContent = "Turn Camera Off";
+            });
+
+            Quagga.onDetected(function(result) {
+                if (scanningPaused) return;
+
+                const code = result.codeResult.code;
+                const box = result.box;
+                const x = Math.min(box[0][0], box[1][0], box[2][0], box[3][0]);
+                const y = Math.min(box[0][1], box[1][1], box[2][1], box[3][1]);
+                const width = Math.max(box[0][0], box[1][0], box[2][0], box[3][0]) - x;
+                const height = Math.max(box[0][1], box[1][1], box[2][1], box[3][1]) - y;
+
+                // 스캔 영역(가운데 빨간색 직사각형)의 경계값을 가져오기
+                const highlightRect = highlight.getBoundingClientRect();
+                const scannerContainerRect = document.querySelector('#scanner-container').getBoundingClientRect();
+
+                // 바코드 박스가 가운데 스캔 영역 내에 있는지 확인
+                const barcodeInRegion = (
+                    x >= highlightRect.left - scannerContainerRect.left &&
+                    x + width <= highlightRect.right - scannerContainerRect.left &&
+                    y >= highlightRect.top - scannerContainerRect.top &&
+                    y + height <= highlightRect.bottom - scannerContainerRect.top
+                );
+
+                if (barcodeInRegion) {
+                    console.log("Barcode detected and processed : [" + code + "]", result);
+
+                    // 바코드 결과 화면에 출력
+                    barcodeResult.textContent = code;
+
+                    // 1초간 스캔 멈추기
+                    scanningPaused = true;
+                    setTimeout(() => {
+                        scanningPaused = false;
+                    }, 1000);
+                }
+            });
+        }
+
+        function stopScanner() {
+            if (Quagga.initialized) {
+                Quagga.stop();
+                cameraIsOn = false;
+                cameraToggle.textContent = "Turn Camera On";
+            }
+        }
+
+        window.onload = function() {
+            // 초기 로딩 시에는 카메라가 꺼져있음
+            cameraToggle.textContent = "Turn Camera On";
+        };
+    </script>
+</body>
+</html>
